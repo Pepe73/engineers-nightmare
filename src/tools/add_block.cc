@@ -4,6 +4,7 @@
 #include "../ship_space.h"
 #include "../mesh.h"
 #include "tools.h"
+#include "../network.h"
 
 
 extern GLuint add_overlay_shader;
@@ -15,7 +16,7 @@ mark_lightfield_update(glm::ivec3 center);
 extern ship_space *ship;
 
 extern hw_mesh *scaffold_hw;
-
+extern ENetPeer *peer;
 
 struct add_block_tool : tool
 {
@@ -35,7 +36,7 @@ struct add_block_tool : tool
 
         /* can only build on the side of an existing scaffold */
         if (bl && rc->block->type == block_support) {
-            bl->type = block_support;
+            set_block_type(peer, rc->px, rc->py, rc->pz, block_support);
             /* dirty the chunk */
             ship->get_chunk_containing(rc->p)->render_chunk.valid = false;
             mark_lightfield_update(rc->p);
