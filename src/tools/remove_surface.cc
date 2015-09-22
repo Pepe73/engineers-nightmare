@@ -5,11 +5,13 @@
 #include "../mesh.h"
 #include "../block.h"
 #include "tools.h"
+#include "../network.h"
 
 
 extern GLuint add_overlay_shader;
 extern GLuint remove_overlay_shader;
 extern GLuint simple_shader;
+extern ENetPeer *peer;
 
 extern void
 mark_lightfield_update(glm::ivec3 p);
@@ -20,7 +22,6 @@ extern hw_mesh *surfs_hw[6];
 
 extern void
 remove_ents_from_surface(glm::ivec3 p, int face);
-
 
 struct remove_surface_tool : tool
 {
@@ -50,7 +51,7 @@ struct remove_surface_tool : tool
         block *other_side = ship->get_block(rc->p);
 
         if (!other_side) {
-            /* expand: note: we shouldn't ever actually have to do this... */
+            // expand: note: we shouldn't ever actually have to do this...
         }
         else {
             other_side->surfs[index ^ 1] = surface_none;

@@ -33,6 +33,7 @@
 #include "src/textureset.h"
 #include "src/tools/tools.h"
 #include "src/wiring/wiring.h"
+#include "src/server_common.h"
 
 #define VSN_MAJOR 0
 #define VSN_MINOR 1
@@ -159,202 +160,9 @@ ENetHost *client;
 ENetPeer *peer;
 bool disconnected = false;
 
-glm::mat4
-mat_block_face(glm::ivec3 p, int face)
-{
-    static glm::vec3 offsets[] = {
-        glm::vec3(1, 0, 0),
-        glm::vec3(0, 0, 1),
-        glm::vec3(0, 1, 0),
-        glm::vec3(0, 0, 1),
-        glm::vec3(0, 1, 1),
-        glm::vec3(0, 0, 0)
-    };
-
-    auto tr = glm::translate(glm::mat4(1), (glm::vec3)p + offsets[face]);
-
-    switch (face) {
-    case surface_zp:
-        return glm::rotate(tr, (float)M_PI, glm::vec3(1.0f, 0.0f, 0.0f));
-    case surface_zm:
-        return tr;
-    case surface_xp:
-        return glm::rotate(tr, -(float)M_PI/2, glm::vec3(0.0f, 1.0f, 0.0f));
-    case surface_xm:
-        return glm::rotate(tr, (float)M_PI/2, glm::vec3(0.0f, 1.0f, 0.0f));
-    case surface_yp:
-        return glm::rotate(tr, (float)M_PI/2, glm::vec3(1.0f, 0.0f, 0.0f));
-    case surface_ym:
-        return glm::rotate(tr, -(float)M_PI/2, glm::vec3(1.0f, 0.0f, 0.0f));
-
-    default:
-        return glm::mat4(1);    /* unreachable */
-    }
-}
-
-
-struct entity_type
-{
-    /* static */
-    char const *name;
-    char const *mesh;
-    int material;
-    bool placed_on_surface;
-    int height;
-
-    /* loader loop does these */
-    sw_mesh *sw;
-    hw_mesh *hw;
-    btTriangleMesh *phys_mesh;
-    btCollisionShape *phys_shape;
-};
-
-
-entity_type entity_types[] = {
-    { "Door", "mesh/single_door_frame.obj", 2, false, 2 },
-    { "Frobnicator", "mesh/frobnicator.obj", 3, false, 1 },
-    { "Light", "mesh/panel_4x4.obj", 8, true, 1 },
-    { "Warning Light", "mesh/warning_light.obj", 8, true, 1 },
-    { "Display Panel", "mesh/panel_4x4.obj", 7, true, 1 },
-    { "Switch", "mesh/panel_1x1.obj", 9, true, 1 },
-    { "Plaidnicator", "mesh/frobnicator.obj", 13, false, 1 },
-    { "Pressure Sensor 1", "mesh/panel_1x1.obj", 12, true, 1 },
-    { "Pressure Sensor 2", "mesh/panel_1x1.obj", 14, true, 1 },
-    { "Sensor Comparator", "mesh/panel_1x1.obj", 13, true, 1 },
-};
-
-
 /* fwd for temp spawn logic just below */
 void
 mark_lightfield_update(glm::ivec3 p);
-
-
-struct entity
-{
-    /* TODO: replace this completely, it's silly. */
-    c_entity ce;
-
-    entity(glm::ivec3 p, unsigned type, int face) {
-        ce = c_entity::spawn();
-
-        auto mat = mat_block_face(p, face);
-
-        auto et = &entity_types[type];
-
-        type_man.assign_entity(ce);
-        type_man.type(ce) = type;
-
-        physics_man.assign_entity(ce);
-        physics_man.rigid(ce) = nullptr;
-        build_static_physics_rb_mat(&mat, et->phys_shape, &physics_man.rigid(ce));
-        /* so that we can get back to the entity from a phys raycast */
-        physics_man.rigid(ce)->setUserPointer(this);
-
-        surface_man.assign_entity(ce);
-        surface_man.block(ce) = p;
-        surface_man.face(ce) = face;
-
-        pos_man.assign_entity(ce);
-        pos_man.position(ce) = p;
-        pos_man.mat(ce) = mat;
-
-        render_man.assign_entity(ce);
-        render_man.mesh(ce) = *et->hw;
-
-        if (type == 0) {
-            power_man.assign_entity(ce);
-            power_man.powered(ce) = false;
-            power_man.required_power(ce) = 8;
-
-            switchable_man.assign_entity(ce);
-            switchable_man.enabled(ce) = true;
-
-            door_man.assign_entity(ce);
-            door_man.mesh(ce) = door_hw;
-            door_man.pos(ce) = 1.0f;
-        }
-        // frobnicator
-        else if (type == 1) {
-            power_man.assign_entity(ce);
-            power_man.powered(ce) = false;
-            power_man.required_power(ce) = 12;
-
-            switchable_man.assign_entity(ce);
-            switchable_man.enabled(ce) = true;
-
-            gas_man.assign_entity(ce);
-            gas_man.flow_rate(ce) = 0.1f;
-            gas_man.max_pressure(ce) = 1.0f;
-        }
-        // light
-        else if (type == 2) {
-            power_man.assign_entity(ce);
-            power_man.powered(ce) = false;
-            power_man.required_power(ce) = 6;
-
-            switchable_man.assign_entity(ce);
-            switchable_man.enabled(ce) = true;
-
-            light_man.assign_entity(ce);
-            light_man.intensity(ce) = 1.f;
-            light_man.type(ce) = 1;
-        }
-        // warning light
-        else if (type == 3) {
-            power_man.assign_entity(ce);
-            power_man.powered(ce) = false;
-            power_man.required_power(ce) = 6;
-
-            switchable_man.assign_entity(ce);
-            switchable_man.enabled(ce) = false;
-
-            light_man.assign_entity(ce);
-            light_man.intensity(ce) = 1.f;
-            light_man.type(ce) = 2;
-        }
-        // display panel
-        else if (type == 4) {
-            power_man.assign_entity(ce);
-            power_man.powered(ce) = false;
-            power_man.required_power(ce) = 4;
-
-            light_man.assign_entity(ce);
-            light_man.intensity(ce) = 0.15f;
-
-            switchable_man.assign_entity(ce);
-            switchable_man.enabled(ce) = true;
-        }
-        // switch
-        else if (type == 5) {
-            switch_man.assign_entity(ce);
-            switch_man.enabled(ce) = true;
-        }
-        // plaidnicator
-        else if (type == 6) {
-            power_provider_man.assign_entity(ce);
-            power_provider_man.max_provided(ce) = 12;
-            power_provider_man.provided(ce) = 12;
-        }
-        // pressure sensor 1
-        else if (type == 7) {
-            pressure_man.assign_entity(ce);
-            pressure_man.pressure(ce) = 0.f;
-            pressure_man.type(ce) = 1;
-        }
-        // pressure sensor 2
-        else if (type == 8) {
-            pressure_man.assign_entity(ce);
-            pressure_man.pressure(ce) = 0.f;
-            pressure_man.type(ce) = 2;
-        }
-        // sensor comparator
-        else if (type == 9) {
-            comparator_man.assign_entity(ce);
-            comparator_man.compare_epsilon(ce) = 0.0001f;
-        }
-    }
-};
-
 
 void use_action_on_entity(ship_space *ship, c_entity ce) {
     /* used by the player */
@@ -761,160 +569,6 @@ resize(int width, int height)
     wnd.height = height;
     printf("Resized to %dx%d\n", width, height);
 }
-
-
-void
-destroy_entity(entity *e)
-{
-    /* removing block influence from this ent */
-    /* this should really be componentified */
-    if (surface_man.exists(e->ce)) {
-        auto b = surface_man.block(e->ce);
-        auto type = &entity_types[type_man.type(e->ce)];
-
-        for (auto i = 0; i < type->height; i++) {
-            auto p = b + glm::ivec3(0, 0, i);
-            block *bl = ship->get_block(p);
-            assert(bl);
-            if (bl->type == block_entity) {
-                printf("emptying %d,%d,%d on remove of ent\n", p.x, p.y, p.z);
-                bl->type = block_empty;
-
-                for (auto face = 0; face < 6; face++) {
-                    /* unreserve all the space */
-                    bl->surf_space[face] = 0;
-                }
-            }
-        }
-    }
-
-    comparator_man.destroy_entity_instance(e->ce);
-    gas_man.destroy_entity_instance(e->ce);
-    light_man.destroy_entity_instance(e->ce);
-    teardown_static_physics_setup(nullptr, nullptr, &physics_man.rigid(e->ce));
-    physics_man.destroy_entity_instance(e->ce);
-    pos_man.destroy_entity_instance(e->ce);
-    power_man.destroy_entity_instance(e->ce);
-    power_provider_man.destroy_entity_instance(e->ce);
-    pressure_man.destroy_entity_instance(e->ce);
-    render_man.destroy_entity_instance(e->ce);
-    surface_man.destroy_entity_instance(e->ce);
-    switch_man.destroy_entity_instance(e->ce);
-    switchable_man.destroy_entity_instance(e->ce);
-    type_man.destroy_entity_instance(e->ce);
-    door_man.destroy_entity_instance(e->ce);
-
-    for (auto _type = 0; _type < num_wire_types; _type++) {
-        auto type = (wire_type)_type;
-        auto & entity_to_attach_lookup = ship->entity_to_attach_lookups[type];
-        auto & wire_attachments = ship->wire_attachments[type];
-
-        /* left side is the index of attach on entity that we're removing
-        * right side is the index we moved from the end into left side
-        * 0, 2 would be read as "attach at index 2 moved to index 0
-        * and assumed that what was at index 0 is no longer valid in referencers
-        */
-        std::unordered_map<unsigned, unsigned> fixup_attaches_removed;
-        auto entity_attaches = entity_to_attach_lookup.find(e->ce);
-        if (entity_attaches != entity_to_attach_lookup.end()) {
-            auto const & set = entity_attaches->second;
-            auto attaches = std::vector<unsigned>(set.begin(), set.end());
-            std::sort(attaches.begin(), attaches.end());
-
-            auto att_size = attaches.size();
-            for (size_t i = 0; i < att_size; ++i) {
-                auto attach = attaches[i];
-
-                // fill left side of fixup map
-                fixup_attaches_removed[attach] = 0;
-            }
-
-            /* Remove relevant attaches from wire_attachments
-            * relevant is an attach that isn't occupying a position
-            * will get popped off as a result of moving before removing
-            */
-            unsigned att_index = (unsigned)attaches.size() - 1;
-            auto swap_index = wire_attachments.size() - 1;
-            for (auto s = wire_attachments.rbegin();
-            s != wire_attachments.rend() && att_index != invalid_attach;) {
-
-                auto from_attach = wire_attachments[swap_index];
-                auto rem = attaches[att_index];
-                if (swap_index > rem) {
-                    wire_attachments[rem] = from_attach;
-                    wire_attachments.pop_back();
-                    fixup_attaches_removed[rem] = (unsigned)swap_index;
-                    --swap_index;
-                    ++s;
-                }
-                else if (swap_index == rem) {
-                    wire_attachments.pop_back();
-                    fixup_attaches_removed.erase(rem);
-                    --swap_index;
-                    ++s;
-                }
-
-                --att_index;
-            }
-
-            /* remove all segments that contain an attach on entity */
-            for (auto remove_attach : attaches) {
-                remove_segments_containing(ship, type, remove_attach);
-            }
-
-            /* remove attaches assigned to entity from ship lookup */
-            entity_to_attach_lookup.erase(e->ce);
-
-            for (auto lookup : fixup_attaches_removed) {
-                /* we moved m to position r */
-                auto r = lookup.first;
-                auto m = lookup.second;
-
-                relocate_segments_and_entity_attaches(ship, type, r, m);
-            }
-
-            attach_topo_rebuild(ship, type);
-        }
-    }
-
-    delete e;
-}
-
-
-void
-remove_ents_from_surface(glm::ivec3 b, int face)
-{
-    chunk *ch = ship->get_chunk_containing(b);
-    for (auto it = ch->entities.begin(); it != ch->entities.end(); /* */) {
-        entity *e = *it;
-
-        /* entities may have been inserted in this chunk which don't have
-         * placement on a surface. don't corrupt everything if we hit one.
-         */
-        if (!surface_man.exists(e->ce)) {
-            ++it;
-            continue;
-        }
-
-        const auto & p = surface_man.block(e->ce);
-        const auto & f = surface_man.face(e->ce);
-
-        auto type = &entity_types[type_man.type(e->ce)];
-
-        if (p.x == b.x && p.y == b.y && p.z <= b.z && p.z + type->height > b.z && f == face) {
-            destroy_entity(e);
-            it = ch->entities.erase(it);
-
-            block *bl = ship->get_block(p);
-            assert(bl);
-            bl->surf_space[face] = 0;   /* we've popped *everything* off, it must be empty now */
-        }
-        else {
-            ++it;
-        }
-    }
-}
-
 
 struct add_block_entity_tool : tool
 {
@@ -2257,6 +1911,7 @@ void
 handle_update_message(ENetEvent *event, uint8_t *data)
 {
     int x, y, z, px, py, pz;
+    glm::ivec3 b, p;
     block *bl, *os;
 
     switch(*data) {
@@ -2265,13 +1920,13 @@ handle_update_message(ENetEvent *event, uint8_t *data)
             px = pack_int(data, 1);
             py = pack_int(data, 5);
             pz = pack_int(data, 9);
+            p = glm::ivec3(px, py, pz);
             printf("setting block at %d,%d,%d to %d\n", px, py, pz, data[13]);
-            bl = ship->get_block(px, py, pz);
+            bl = ship->get_block(p);
             if(bl) {
                 bl->type = (enum block_type)data[13];
-                ship->get_chunk_containing(px, py, pz)
-                    ->render_chunk.valid = false;
-                mark_lightfield_update(px, py, pz);
+                ship->get_chunk_containing(p)->render_chunk.valid = false;
+                mark_lightfield_update(p);
             } else {
                 printf("attempt to set non-existent block(%d, %d, %d)!\n",
                         px, py, pz);
@@ -2285,21 +1940,21 @@ handle_update_message(ENetEvent *event, uint8_t *data)
             px = pack_int(data, 13);
             py = pack_int(data, 17);
             pz = pack_int(data, 21);
+            b = glm::ivec3(x, y, z);
+            p = glm::ivec3(px, py, pz);
             printf("setting texture at %d,%d,%d|%d,%d,%d to %d on %d\n",
                     x, y, z, px, py, pz, data[26], data[25]);
-            bl = ship->get_block(x, y, z);
-            os = ship->get_block(px, py, pz);
+            bl = ship->get_block(b);
+            os = ship->get_block(p);
             if(bl && os) {
-                ship->ensure_block(x, y, z);
-                ship->ensure_block(px, py, pz);
+                ship->ensure_block(b);
+                ship->ensure_block(p);
                 bl->surfs[data[25]] = (enum surface_type)data[26];
                 os->surfs[data[25] ^ 1] = (enum surface_type)data[26];
-                ship->get_chunk_containing(x, y, z)
-                    ->render_chunk.valid = false;
-                ship->get_chunk_containing(px, py, pz)
-                    ->render_chunk.valid = false;
-                mark_lightfield_update(x, y, z);
-                mark_lightfield_update(px, py, pz);
+                ship->get_chunk_containing(b)->render_chunk.valid = false;
+                ship->get_chunk_containing(p)->render_chunk.valid = false;
+                mark_lightfield_update(b);
+                mark_lightfield_update(p);
             } else {
                 if(!bl)
                     printf("attempt to set non-existent block(%d, %d, %d)!\n",

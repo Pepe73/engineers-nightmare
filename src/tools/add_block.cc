@@ -36,8 +36,7 @@ struct add_block_tool : tool
 
         /* can only build on the side of an existing scaffold */
         if (bl && rc->block->type == block_support) {
-            set_block_type(peer, glm::vec3(rc->px, rc->py, rc->pz),
-                    block_support);
+            set_block_type(peer, rc->p, block_support);
             /* dirty the chunk */
             ship->get_chunk_containing(rc->p)->render_chunk.valid = false;
             mark_lightfield_update(rc->p);
